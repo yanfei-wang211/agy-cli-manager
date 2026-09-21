@@ -133,3 +133,24 @@ class ManagerRegressionTests(unittest.TestCase):
             identity = m.probe_profile_identity_via_usage(m.account_dir(self.paths, "b"))
         self.assertEqual(identity["account_name"], "b@example.com")
         self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-b")
+
+    def test_active_usage_refresh_does_not_copy_new_active_token_to_old_account(self) -> None:
+        self.add("a")
+        self.add("b")
+        payload = json.dumps({"token": {"access_token": "access-a"}})
+        self.token(self.live_home).write_text(payload, encoding="utf-8")
+        self.token(m.account_dir(self.paths, "a")).write_text(payload, encoding="utf-8")
+
+        def fake_cloudcode(token, endpoint, body):
+            self.assertEqual(token, "access-a")
+            if endpoint == m.CODE_ASSIST_LOAD_PATH:
+                m.switch_account(self.paths, "b")
+                return {"cloudaicompanionProject": "project-a"}
+            return {"groups": []}
+
+        with mock.patch.object(m, "_cloudcode_request", side_effect=fake_cloudcode), \
+             mock.patch.object(m, "_best_effort_live_identity", return_value=None):
+            result = m.refresh_account_usage(self.paths)
+        self.assertEqual(result.account, "a")
+        self.assertEqual(self.token(m.account_dir(self.paths, "a")).read_text(encoding="utf-8"), payload)
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-b")

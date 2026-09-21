@@ -1210,9 +1210,20 @@ def refresh_account_usage(
     agy_binary: str | None = None,
     warmup_timeout_seconds: int = 45,
 ) -> UsageRefreshResult:
+    live_home = None
+    initial_live_token = None
     with manager_lock(paths):
         state = sync_state_from_disk(paths, load_state(paths))
-        account_name, source_home = _resolve_usage_refresh_target(paths, state, name)
+        account_name, _ = _resolve_usage_refresh_target(paths, state, name)
+        source_home = account_dir(paths, account_name)
+        if name is None and state.get("active") == account_name:
+            live_dir = get_live_dir(state)
+            if live_dir is not None:
+                live_home = live_dir.parent
+                live_token = _oauth_token_path(live_home)
+                if live_token.is_file():
+                    initial_live_token = live_token.read_bytes()
+                    _copy_managed_profile_files(_resolve_profile_source(live_home), source_home / ".gemini")
     try:
         needs_warmup = False
         try:
@@ -1281,17 +1292,6 @@ def refresh_account_usage(
         )
 
         refreshed_at = utc_now()
-        if source_home != account_dir(paths, account_name):
-            target_dir = account_dir(paths, account_name)
-            if target_dir.exists():
-                source_profile = _resolve_profile_source(source_home)
-                target_profile = target_dir / ".gemini"
-                _copy_managed_profile_files(source_profile, target_profile)
-                project_id_file = _project_id_path(source_home)
-                if project_id_file.is_file():
-                    dst_project_id = _project_id_path(target_dir)
-                    dst_project_id.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(project_id_file, dst_project_id)
         refreshed_identity = detect_profile_identity(account_dir(paths, account_name))
         if not refreshed_identity.get("account_name") and isinstance(access_token, str) and access_token.strip():
             try:
@@ -1305,6 +1305,13 @@ def refresh_account_usage(
             meta = state["accounts"].get(account_name)
             if meta is None:
                 raise ValueError(f"Account not found: {account_name}")
+            # A warmup may refresh the saved token. Publish it only if the
+            # same account is still active and agy has not updated live auth.
+            if live_home is not None and initial_live_token is not None and state.get("active") == account_name:
+                live_token = _oauth_token_path(live_home)
+                saved_token = _oauth_token_path(source_home)
+                if live_token.is_file() and saved_token.is_file() and live_token.read_bytes() == initial_live_token:
+                    shutil.copy2(saved_token, live_token)
             windows = _normalize_usage_windows(meta)
             windows["short"]["status"] = result.short_usage_status
             windows["short"]["value"] = result.short_usage_value
