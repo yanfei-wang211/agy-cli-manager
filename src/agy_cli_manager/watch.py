@@ -404,6 +404,9 @@ def poll_quota_logs(
                     reason="quota",
                     cooldown_minutes=cooldown_minutes,
                     force_switch=force_switch,
+                    # Log cursors and source-session tracking already dedupe
+                    # repeated lines. A new session can fail immediately.
+                    dedupe_seconds=0,
                     trigger="log-watch",
                 )
                 rotated = rotation.outcome == "switched"

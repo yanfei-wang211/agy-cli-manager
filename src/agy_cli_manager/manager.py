@@ -2383,7 +2383,8 @@ def rotate_after_failure_locked(
 
     last_completed_at = parse_timestamp(runtime.get("last_completed_at"))
     if (
-        runtime.get("status") == "ready"
+        dedupe_seconds > 0
+        and runtime.get("status") == "ready"
         and runtime.get("reason") == reason
         and last_completed_at is not None
         and (now - last_completed_at).total_seconds() <= dedupe_seconds

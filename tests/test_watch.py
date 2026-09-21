@@ -354,6 +354,21 @@ class LogWatchIntegrationTests(unittest.TestCase):
             self.assertEqual(new_process.rotation.previous_active, "account-b")
             self.assertEqual(new_process.rotation.switched_to, "account-c")
 
+    def test_immediate_new_session_quota_rotates_again(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            paths, live_dir, old_log = _make_watch_harness(Path(tmp))
+            poll_quota_logs(paths, rotate=True)
+            _append_log(old_log, SAMPLE_QUOTA_LINE)
+            first = poll_quota_logs(paths, rotate=True)
+            self.assertEqual(first.rotation.switched_to, "account-b")
+
+            new_log = live_dir / "antigravity-cli" / "log" / "cli-new-session.log"
+            new_log.write_text(SAMPLE_TUI_LINE + "\n", encoding="utf-8")
+            second = poll_quota_logs(paths, rotate=True)
+            self.assertTrue(second.rotated)
+            self.assertEqual(second.rotation.switched_to, "account-c")
+            self.assertEqual(get_status_snapshot(paths)["active"], "account-c")
+
     def test_concurrent_pollers_keep_cursors_consistent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths, _live_dir, log_path = _make_watch_harness(Path(tmp), names=("account-a",))
