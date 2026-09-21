@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -49,3 +50,34 @@ class ManagerRegressionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.save_account_profile(self.paths, "linked", self.base / "source-a", overwrite=True)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
+    def test_interrupted_state_write_keeps_previous_state(self) -> None:
+        self.add("a")
+        old_state = self.paths.state_file.read_text(encoding="utf-8")
+
+        def interrupted_dump(data, handle, **kwargs):
+            handle.write('{"active":')
+            raise OSError("simulated interrupted write")
+
+        with mock.patch.object(m.json, "dump", side_effect=interrupted_dump):
+            with self.assertRaises(OSError):
+                m.save_state(self.paths, m.load_state(self.paths))
+        self.assertEqual(self.paths.state_file.read_text(encoding="utf-8"), old_state)
+
+    def test_status_read_does_not_revert_concurrent_switch(self) -> None:
+        self.add("a")
+        self.add("b")
+        original_sync = m.sync_state_from_disk
+        switched = False
+
+        def interleaved_switch(paths, state):
+            nonlocal switched
+            result = original_sync(paths, state)
+            if not switched:
+                switched = True
+                m.switch_account(paths, "b")
+            return result
+
+        with mock.patch.object(m, "sync_state_from_disk", side_effect=interleaved_switch):
+            m.format_status(self.paths)
+        self.assertEqual(m.load_state(self.paths)["active"], "b")

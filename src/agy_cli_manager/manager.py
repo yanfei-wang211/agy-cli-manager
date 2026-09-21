@@ -220,8 +220,17 @@ def load_state(paths: ManagerPaths) -> dict:
 
 
 def save_state(paths: ManagerPaths, state: dict) -> None:
-    with paths.state_file.open("w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2, sort_keys=True)
+    paths.state_file.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".state-", suffix=".tmp", dir=paths.state_file.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temporary, paths.state_file)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def _normalize_switch_mode(value: object) -> str:
@@ -2640,7 +2649,6 @@ def login_account(
 
 def format_status(paths: ManagerPaths) -> str:
     state = sync_state_from_disk(paths, load_state(paths))
-    save_state(paths, state)
     switch_runtime = _normalize_switch_runtime(state.get("switch_runtime"))
     switch_history = _normalize_switch_history(state.get("switch_history"))
     lines = [
