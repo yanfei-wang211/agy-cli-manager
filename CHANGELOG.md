@@ -13,6 +13,17 @@
 - add `agy-cli-manager ack-restart` (dashboard `Y`) to clear `restart_required` after `agy` is restarted
 - persist an `initialized` marker so the first log created after an empty start is read from offset 0
 
+### Fixes
+
+- reject account names that escape the accounts directory or resolve through an account symlink
+- write manager state atomically and keep status reads from overwriting concurrent switches
+- preserve an explicitly cleared live directory across state reloads
+- finish failover cleanly when every standby account is missing usable authentication
+- allow a new `agy` session to fail over immediately, even within the previous switch's deduplication window
+- run named model and identity probes in the selected account's own home without changing the shared runtime
+- refresh quota against the selected account's saved profile so a concurrent switch cannot copy another account's token into it
+- run interactive login in a temporary home so failed login leaves the live account intact and adding a standby does not silently activate it
+
 ## v0.2.1 - 2026-07-15
 
 - preserve the explicit profile name supplied during login
