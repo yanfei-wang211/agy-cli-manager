@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import json
+import subprocess
 from pathlib import Path
 from unittest import mock
 
@@ -102,3 +103,33 @@ class ManagerRegressionTests(unittest.TestCase):
         self.assertIsNone(state["active"])
         self.assertEqual(state["switch_runtime"]["status"], "no_account")
         self.assertEqual(state["accounts"]["a"]["fail_count"], 1)
+
+    def test_named_models_probe_does_not_touch_live_or_runtime_during_switch(self) -> None:
+        for name in ("a", "b", "c"):
+            self.add(name)
+
+        def run_models(home, **kwargs):
+            self.assertEqual(home, m.account_dir(self.paths, "b"))
+            m.switch_account(self.paths, "c")
+            return [{"name": "model"}]
+
+        with mock.patch.object(m, "_run_agy_models_command", side_effect=run_models):
+            m.list_models(self.paths, "b")
+        self.assertEqual(m.load_state(self.paths)["active"], "c")
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-c")
+        self.assertEqual(self.token(self.paths.runtime_dir).read_text(encoding="utf-8"), "token-c")
+
+    def test_identity_probe_uses_selected_account_home(self) -> None:
+        self.add("a")
+        self.add("b")
+
+        def run_probe(*args, **kwargs):
+            self.assertEqual(kwargs["env"]["HOME"], str(m.account_dir(self.paths, "b")))
+            m.switch_account(self.paths, "b")
+            return subprocess.CompletedProcess(args[0], 0, "b@example.com", "")
+
+        with mock.patch.object(m, "resolve_agy_binary", return_value="agy"), \
+             mock.patch.object(m.subprocess, "run", side_effect=run_probe):
+            identity = m.probe_profile_identity_via_usage(m.account_dir(self.paths, "b"))
+        self.assertEqual(identity["account_name"], "b@example.com")
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-b")

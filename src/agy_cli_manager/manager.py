@@ -1173,8 +1173,6 @@ def list_models(
     with manager_lock(paths):
         state = sync_state_from_disk(paths, load_state(paths))
         account_name, source_home = _resolve_usage_refresh_target(paths, state, name)
-        live_dir = get_live_dir(state)
-    runtime_home = resolve_runtime_home(live_dir)
     if not profile_has_login_artifacts(_resolve_profile_source(source_home)):
         fallback_home = account_dir(paths, account_name)
         if name is None and profile_has_login_artifacts(_resolve_profile_source(fallback_home)):
@@ -1182,24 +1180,7 @@ def list_models(
         else:
             raise ValueError(f"Profile source is missing required auth files: {_resolve_profile_source(source_home)}")
 
-    if name is None:
-        models = _run_agy_models_command(source_home, agy_binary=agy_binary, timeout_seconds=timeout_seconds)
-        return {
-            "account": account_name,
-            "source_home": str(source_home),
-            "models": models,
-            "count": len(models),
-        }
-
-    with tempfile.TemporaryDirectory(prefix="agy-models-restore-") as restore_root_str:
-        restore_root = Path(restore_root_str)
-        restore_home = restore_root / "home"
-        _copy_account_profile(runtime_home, restore_home)
-        try:
-            _copy_account_profile(source_home, runtime_home)
-            models = _run_agy_models_command(runtime_home, agy_binary=agy_binary, timeout_seconds=timeout_seconds)
-        finally:
-            _copy_account_profile(restore_home, runtime_home)
+    models = _run_agy_models_command(source_home, agy_binary=agy_binary, timeout_seconds=timeout_seconds)
     return {
         "account": account_name,
         "source_home": str(source_home),
@@ -1664,46 +1645,38 @@ def probe_profile_identity_via_usage(
     profile_source = _resolve_profile_source(source_dir)
     if not profile_has_login_artifacts(profile_source):
         raise ValueError(f"Profile source is missing required auth files: {profile_source}")
-    runtime_home = resolve_runtime_home(live_dir)
+    # Each saved account is already a complete home. Probing it directly keeps
+    # the shared live home and the manager runtime untouched during switches.
+    del live_dir
+    env = os.environ.copy()
+    env["HOME"] = str(source_home)
+    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
 
-    with tempfile.TemporaryDirectory(prefix="agy-usage-restore-") as restore_root_str:
-        restore_root = Path(restore_root_str)
-        restore_home = restore_root / "home"
-        _copy_account_profile(runtime_home, restore_home)
-        try:
-            _copy_account_profile(source_home, runtime_home)
+    proc = subprocess.run(
+        [resolved_binary, "-p", "/usage"],
+        cwd=source_home,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=timeout_seconds,
+        check=False,
+    )
+    output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
+    if proc.returncode != 0:
+        tail = "\n".join(output.splitlines()[-8:]) if output else "no output"
+        raise ValueError(f"agy /usage failed with exit code {proc.returncode}: {tail}")
 
-            env = os.environ.copy()
-            env["HOME"] = str(runtime_home)
-            env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
-
-            proc = subprocess.run(
-                [resolved_binary, "-p", "/usage"],
-                cwd=runtime_home,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-            output = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
-            if proc.returncode != 0:
-                tail = "\n".join(output.splitlines()[-8:]) if output else "no output"
-                raise ValueError(f"agy /usage failed with exit code {proc.returncode}: {tail}")
-
-            match = EMAIL_PATTERN.search(output)
-            if match:
-                return {
-                    "account_name": match.group(0),
-                    "source": "agy:/usage",
-                }
-            return {
-                "account_name": None,
-                "source": "agy:/usage",
-                "raw_hint": "\n".join(output.splitlines()[:8]),
-            }
-        finally:
-            _copy_account_profile(restore_home, runtime_home)
+    match = EMAIL_PATTERN.search(output)
+    if match:
+        return {
+            "account_name": match.group(0),
+            "source": "agy:/usage",
+        }
+    return {
+        "account_name": None,
+        "source": "agy:/usage",
+        "raw_hint": "\n".join(output.splitlines()[:8]),
+    }
 
 
 def resolve_login_profile_identity(
