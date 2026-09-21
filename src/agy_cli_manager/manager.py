@@ -994,7 +994,7 @@ def _best_switch_candidate(paths: ManagerPaths, state: dict, *, exclude: str | N
         ranked.append((score, name))
 
     if not ranked:
-        return candidates[0]
+        return None
 
     ranked.sort(key=lambda item: item[0])
     return ranked[0][1]

@@ -91,3 +91,14 @@ class ManagerRegressionTests(unittest.TestCase):
         m.switch_account(self.paths, "b")
         self.assertIsNone(m.get_live_dir(m.load_state(self.paths)))
         self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), original_live)
+
+    def test_failover_with_only_invalid_standbys_finishes_cleanly(self) -> None:
+        self.add("a")
+        self.add("b")
+        self.token(m.account_dir(self.paths, "b")).unlink()
+        result = m.rotate_after_failure(self.paths, "quota")
+        state = m.load_state(self.paths)
+        self.assertEqual(result.outcome, "no_candidate")
+        self.assertIsNone(state["active"])
+        self.assertEqual(state["switch_runtime"]["status"], "no_account")
+        self.assertEqual(state["accounts"]["a"]["fail_count"], 1)
