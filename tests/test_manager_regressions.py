@@ -6,6 +6,8 @@ import tempfile
 import unittest
 import json
 import subprocess
+import io
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -154,3 +156,34 @@ class ManagerRegressionTests(unittest.TestCase):
         self.assertEqual(result.account, "a")
         self.assertEqual(self.token(m.account_dir(self.paths, "a")).read_text(encoding="utf-8"), payload)
         self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-b")
+
+    def test_failed_login_preserves_live_token(self) -> None:
+        self.add("a")
+        with mock.patch.object(m.os, "isatty", return_value=True), \
+             mock.patch.object(m, "resolve_agy_binary", return_value="/fake/agy"), \
+             mock.patch.object(m.subprocess, "Popen", side_effect=FileNotFoundError):
+            with self.assertRaises(ValueError):
+                m.login_account(self.paths, "b", None)
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-a")
+        self.assertEqual(m.load_state(self.paths)["active"], "a")
+
+    def test_successful_standby_login_keeps_current_live_account(self) -> None:
+        self.add("a")
+
+        def fake_login(*args, **kwargs):
+            home = Path(kwargs["env"]["HOME"])
+            self.assertNotEqual(home, self.live_home)
+            token = self.token(home)
+            token.parent.mkdir(parents=True)
+            token.write_text("token-b", encoding="utf-8")
+            return mock.Mock(poll=mock.Mock(return_value=0))
+
+        with mock.patch.object(m.os, "isatty", return_value=True), \
+             mock.patch.object(m, "resolve_agy_binary", return_value="/fake/agy"), \
+             mock.patch.object(m.subprocess, "Popen", side_effect=fake_login), \
+             mock.patch.object(m, "resolve_login_profile_identity", return_value={}), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(m.login_account(self.paths, "b", None), "b")
+        self.assertEqual(m.load_state(self.paths)["active"], "a")
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-a")
+        self.assertEqual(self.token(m.account_dir(self.paths, "b")).read_text(encoding="utf-8"), "token-b")

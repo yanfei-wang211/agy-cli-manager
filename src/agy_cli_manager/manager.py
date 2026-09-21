@@ -2548,82 +2548,77 @@ def login_account(
         raise ValueError("Interactive login requires a TTY.")
 
     resolved_binary = resolve_agy_binary(agy_binary)
-    with manager_lock(paths):
-        state = sync_state_from_disk(paths, load_state(paths))
-        live_dir = get_live_dir(state) or default_live_dir()
-        state["live_dir"] = str(live_dir.resolve())
-        save_state(paths, state)
+    ensure_layout(paths)
+    with tempfile.TemporaryDirectory(prefix="login-", dir=paths.root) as home_string:
+        runtime_home = Path(home_string)
+        login_dir = runtime_home / ".gemini"
+        login_dir.mkdir()
 
-    runtime_home = live_dir.parent
-    runtime_home.mkdir(parents=True, exist_ok=True)
-    _remove_managed_profile_files(live_dir)
+        env = os.environ.copy()
+        env["HOME"] = str(runtime_home)
+        env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+        try:
+            proc = subprocess.Popen(
+                [resolved_binary],
+                stdin=sys.stdin,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=runtime_home,
+                env=env,
+                close_fds=True,
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(f"agy binary not found: {resolved_binary}") from exc
 
-    env = os.environ.copy()
-    env["HOME"] = str(runtime_home)
-    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
-    try:
-        proc = subprocess.Popen(
-            [resolved_binary],
-            stdin=sys.stdin,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=runtime_home,
-            env=env,
-            close_fds=True,
-        )
-    except FileNotFoundError as exc:
-        raise ValueError(f"agy binary not found: {resolved_binary}") from exc
-
-    start_time = time.time()
-    print("Launching real agy login session.")
-    print("Complete onboarding/login there, then exit agy to save the profile.")
-    sys.stdout.flush()
-    try:
-        while True:
-            if proc.poll() is not None:
-                break
-            if time.time() - start_time > timeout_seconds:
+        start_time = time.time()
+        print("Launching real agy login session.")
+        print("Complete onboarding/login there, then exit agy to save the profile.")
+        sys.stdout.flush()
+        try:
+            while True:
+                if proc.poll() is not None:
+                    break
+                if time.time() - start_time > timeout_seconds:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise ValueError(f"Login timed out after {timeout_seconds} seconds.")
+                time.sleep(0.2)
+        except KeyboardInterrupt:
+            if proc.poll() is None:
                 proc.terminate()
                 try:
                     proc.wait(timeout=3)
                 except subprocess.TimeoutExpired:
                     proc.kill()
-                raise ValueError(f"Login timed out after {timeout_seconds} seconds.")
-            time.sleep(0.2)
-    except KeyboardInterrupt:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-        raise
+            raise
 
-    if not live_dir.is_dir() or not profile_has_login_artifacts(live_dir):
-        raise ValueError("agy login did not produce a usable auth profile.")
+        if not profile_has_login_artifacts(login_dir):
+            raise ValueError("agy login did not produce a usable auth profile.")
 
-    identity = resolve_login_profile_identity(live_dir, agy_binary=resolved_binary, live_dir=live_dir)
-    detected_name = identity.get("account_name")
-    # The caller's name is the stable profile label.  Keep detected identity
-    # as metadata so two profiles from the same or changing login identity do
-    # not collapse onto one storage directory.
-    storage_name = normalize_account_storage_name(name)
-    if detected_name and storage_name != name:
-        print(f"detected-account: {detected_name}")
-        print(f"storage-name: {storage_name}")
+        identity = resolve_login_profile_identity(login_dir, agy_binary=resolved_binary, live_dir=login_dir)
+        detected_name = identity.get("account_name")
+        # The caller's name is the stable profile label. Keep detected identity
+        # as metadata so multiple profiles never collapse onto one directory.
+        storage_name = normalize_account_storage_name(name)
+        if detected_name and storage_name != name:
+            print(f"detected-account: {detected_name}")
+            print(f"storage-name: {storage_name}")
 
-    overwrite = False
-    if account_dir(paths, storage_name).exists():
-        prompt = f"Account '{storage_name}' already exists. Overwrite it? [y/N]: "
-        answer = input(prompt).strip().lower()
-        if answer not in {"y", "yes"}:
-            storage_name = next_available_account_name(paths, storage_name)
-            print(f"saving-as: {storage_name}")
-        else:
-            overwrite = True
+        overwrite = False
+        if account_dir(paths, storage_name).exists():
+            prompt = f"Account '{storage_name}' already exists. Overwrite it? [y/N]: "
+            answer = input(prompt).strip().lower()
+            if answer not in {"y", "yes"}:
+                storage_name = next_available_account_name(paths, storage_name)
+                print(f"saving-as: {storage_name}")
+            else:
+                overwrite = True
 
-    save_account_profile(paths, storage_name, runtime_home, overwrite=overwrite)
-    return storage_name
+        save_account_profile(paths, storage_name, runtime_home, overwrite=overwrite)
+        return storage_name
 
 
 def format_status(paths: ManagerPaths) -> str:
