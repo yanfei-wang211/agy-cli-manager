@@ -409,7 +409,14 @@ def _append_switch_history(
 
 
 def account_dir(paths: ManagerPaths, name: str) -> Path:
-    return paths.accounts_dir / name
+    if not isinstance(name, str) or not name.strip() or name in {".", ".."}:
+        raise ValueError("Account name must be a non-empty directory name.")
+    if "/" in name or "\\" in name or Path(name).name != name:
+        raise ValueError("Account name cannot contain path separators.")
+    target = paths.accounts_dir / name
+    if target.is_symlink():
+        raise ValueError(f"Account directory cannot be a symlink: {name}")
+    return target
 
 
 def _clear_directory(path: Path) -> None:
