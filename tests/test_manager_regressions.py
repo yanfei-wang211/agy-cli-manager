@@ -81,3 +81,13 @@ class ManagerRegressionTests(unittest.TestCase):
         with mock.patch.object(m, "sync_state_from_disk", side_effect=interleaved_switch):
             m.format_status(self.paths)
         self.assertEqual(m.load_state(self.paths)["active"], "b")
+
+    def test_clearing_live_dir_stays_cleared_after_reload_and_switch(self) -> None:
+        self.add("a")
+        self.add("b")
+        original_live = self.token(self.live_home).read_text(encoding="utf-8")
+        m.set_live_dir(self.paths, None)
+        self.assertIsNone(m.get_live_dir(m.load_state(self.paths)))
+        m.switch_account(self.paths, "b")
+        self.assertIsNone(m.get_live_dir(m.load_state(self.paths)))
+        self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), original_live)

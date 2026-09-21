@@ -214,8 +214,6 @@ def load_state(paths: ManagerPaths) -> dict:
     data["switch_policy"] = _normalize_switch_policy(data.get("switch_policy"))
     data["switch_runtime"] = _normalize_switch_runtime(data.get("switch_runtime"))
     data["switch_history"] = _normalize_switch_history(data.get("switch_history"))
-    if data.get("live_dir") is None:
-        data["live_dir"] = str(default_live_dir())
     return data
 
 
