@@ -30,6 +30,12 @@ Project links:
 - Upstream project: `https://github.com/zcop/agy-cli-manager`
 - Upstream releases and site: `https://github.com/zcop/agy-cli-manager/releases` · `https://zcop.github.io/agy-cli-manager/`
 
+## Fork provenance and usage terms
+
+This is an independent fork of zcop's `agy-cli-manager` v0.2.2 (upstream commit `aa0410e`). It preserves the upstream MIT license and copyright notice. Compared with that version, this fork adds the `agy-managed` session supervisor, account-scoped log watching, quota-failure handling, isolated named-account launchers, and related tests. It is not an official Google or upstream release.
+
+Open-source permission to modify and publish this code is separate from permission to use Google's service. The current [Google Antigravity Additional Terms](https://antigravity.google/terms) and [FAQ](https://www.antigravity.google/docs/faq/) say that accessing Antigravity through third-party software or tools violates their terms and may lead to account suspension. This manager reads Antigravity OAuth token files and directly requests quota data, so do **not** assume its use is permitted by Google. Check the applicable service terms or obtain permission before using it; this fork makes no claim of Google authorization.
+
 ## What it does
 
 - stores multiple account profiles safely
