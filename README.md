@@ -26,9 +26,9 @@ It is application-agnostic. A Telegram bot can call it, but the manager itself i
 
 Project links:
 
-- Repo: `https://github.com/zcop/agy-cli-manager`
-- Release wheel: `https://github.com/zcop/agy-cli-manager/releases`
-- GitHub Pages site: `https://zcop.github.io/agy-cli-manager/`
+- This fork: `https://github.com/yanfei-wang211/agy-cli-manager`
+- Upstream project: `https://github.com/zcop/agy-cli-manager`
+- Upstream releases and site: `https://github.com/zcop/agy-cli-manager/releases` · `https://zcop.github.io/agy-cli-manager/`
 
 ## What it does
 
@@ -52,19 +52,15 @@ Project links:
 
 ## Install
 
-From a GitHub release wheel:
+To install this fork, including `agy-managed` and its quota failover changes:
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
-pip install https://github.com/zcop/agy-cli-manager/releases/download/v0.2.2/agy_cli_manager-0.2.2-py3-none-any.whl
+pip install git+https://github.com/yanfei-wang211/agy-cli-manager.git
 ```
 
-To upgrade an existing installation to this release:
-
-```bash
-pip install --upgrade https://github.com/zcop/agy-cli-manager/releases/download/v0.2.2/agy_cli_manager-0.2.2-py3-none-any.whl
-```
+The upstream v0.2.2 release wheel does not include this fork's supervisor changes.
 
 From this repo:
 
@@ -153,6 +149,18 @@ agy-cli-manager ack-restart
 ```
 
 Leave the dashboard open instead of `watch` if you prefer (`Y` acknowledges the restart). Do not pass `--from-start` unless you intend to replay old quota errors.
+
+### 6. Automatic session supervisor (`agy-managed`)
+
+The package provides `agy-managed`. A local `agy` wrapper is optional and is not installed by this package; automation should invoke `agy-managed` explicitly rather than relying on `PATH` order.
+
+`agy-managed`:
+- Launches `agy` with full terminal/TTY inheritance (no stdout/stderr pipes, avoiding buffer deadlocks).
+- Launches with the selected account's isolated `--gemini_dir` and watches that account's session logs for `RESOURCE_EXHAUSTED` / `Individual quota reached` (including reset durations such as `~2h`). Setting `SSH_CONNECTION` alone does not isolate the macOS Keychain.
+- On quota limit: marks the exhausted account into cooldown, selects another account's isolated profile, and re-launches `agy` in **prompt-guided resume mode** (`--continue --prompt-interactive "<RESUME_PROMPT>"`). This is a prompt-guided restart, not remote conversation state migration.
+- If all configured accounts are exhausted or in cooldown, outputs a structured JSON/table report and exits with code 2.
+
+The failover unit tests pass, but a real online quota exhaustion and prompt-guided restart have not yet been validated end to end.
 
 ## First Useful Commands
 

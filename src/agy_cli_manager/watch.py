@@ -30,6 +30,29 @@ WEEKLY_QUOTA_RE = re.compile(r"weekly quota reached", re.IGNORECASE)
 RESET_HINT_RE = re.compile(r"Resets in\s+(?P<reset>~?[^.)]+)", re.IGNORECASE)
 
 
+def parse_reset_hint_minutes(hint: str | None, default_minutes: int = DEFAULT_WATCH_COOLDOWN_MINUTES) -> int:
+    """Parse reset hint text (e.g. '~2h', '1h45m7s', '45m', '30s') into minutes."""
+    if not hint:
+        return default_minutes
+    clean = hint.strip().lstrip("~")
+    hours = 0
+    mins = 0
+    secs = 0
+    h_match = re.search(r"(\d+)\s*(?:hours?|h|hrs?)", clean, re.IGNORECASE)
+    if h_match:
+        hours = int(h_match.group(1))
+    m_match = re.search(r"(\d+)\s*(?:minutes?|mins?|m)", clean, re.IGNORECASE)
+    if m_match:
+        mins = int(m_match.group(1))
+    s_match = re.search(r"(\d+)\s*(?:seconds?|secs?|s)", clean, re.IGNORECASE)
+    if s_match:
+        secs = int(s_match.group(1))
+    sec_mins = (secs + 59) // 60 if secs > 0 else 0
+    total = hours * 60 + mins + sec_mins
+    return max(1, total) if total > 0 else default_minutes
+
+
+
 @dataclass(frozen=True)
 class QuotaLogEvent:
     kind: str
@@ -351,8 +374,10 @@ def poll_quota_logs(
     force_switch: bool = False,
     cooldown_minutes: int = DEFAULT_WATCH_COOLDOWN_MINUTES,
     on_rotate: str | None = None,
+    account_name: str | None = None,
 ) -> WatchPollResult:
     from agy_cli_manager.manager import (
+        account_dir,
         get_live_dir,
         get_switch_mode,
         load_state,
@@ -363,7 +388,7 @@ def poll_quota_logs(
     on_rotate_cmd = None
     with manager_lock(paths):
         state = load_state(paths)
-        live_dir = get_live_dir(state)
+        live_dir = account_dir(paths, account_name) / ".gemini" if account_name else get_live_dir(state)
         switch_mode = get_switch_mode(state)
         watch_state = load_log_watch_state(paths.root)
         cursors = dict(watch_state.get("cursors") or {})
@@ -387,6 +412,8 @@ def poll_quota_logs(
             _disarm_restart(watch_state, keep_source_logs=True)
 
         events_for_rotate = [event for event in events if event.path not in ignored_logs]
+        if account_name and state.get("active") != account_name:
+            events_for_rotate = []
 
         if events:
             _record_last_event(watch_state, events)
@@ -399,10 +426,12 @@ def poll_quota_logs(
         elif events_for_rotate:
             should_rotate = rotate and (force_switch or switch_mode == "auto")
             if should_rotate:
+                event = events_for_rotate[-1]
+                effective_cooldown = parse_reset_hint_minutes(event.reset_hint, cooldown_minutes)
                 rotation = rotate_after_failure_locked(
                     paths,
                     reason="quota",
-                    cooldown_minutes=cooldown_minutes,
+                    cooldown_minutes=effective_cooldown,
                     force_switch=force_switch,
                     # Log cursors and source-session tracking already dedupe
                     # repeated lines. A new session can fail immediately.
@@ -419,6 +448,18 @@ def poll_quota_logs(
                     message = (
                         f"rotated {rotation.previous_active} -> {rotation.switched_to}; "
                         "restart agy to pick up the new token"
+                    )
+                    if on_rotate:
+                        on_rotate_cmd = on_rotate
+                elif rotation.outcome == "no_candidate":
+                    _arm_restart(
+                        watch_state,
+                        account=None,
+                        source_logs=sorted(next_cursors),
+                    )
+                    message = (
+                        f"quota error observed on {rotation.previous_active}; "
+                        "all accounts exhausted, no candidate available"
                     )
                     if on_rotate:
                         on_rotate_cmd = on_rotate
@@ -487,6 +528,7 @@ def watch_quota_logs(
     force_switch: bool = False,
     cooldown_minutes: int = DEFAULT_WATCH_COOLDOWN_MINUTES,
     on_rotate: str | None = None,
+    account_name: str | None = None,
     as_json: bool = False,
     printer=print,
 ) -> int:
@@ -502,6 +544,7 @@ def watch_quota_logs(
             force_switch=force_switch,
             cooldown_minutes=cooldown_minutes,
             on_rotate=on_rotate,
+            account_name=account_name,
         )
         first = False
         if result.events or result.rotated or once or as_json:

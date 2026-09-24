@@ -19,6 +19,7 @@ from agy_cli_manager.manager import (
     save_state,
     set_live_dir,
     set_switch_mode,
+    switch_account,
     utc_now,
 )
 from agy_cli_manager.watch import (
@@ -279,6 +280,26 @@ def _cooldown_names(paths) -> list[str]:
 
 
 class LogWatchIntegrationTests(unittest.TestCase):
+    def test_scoped_watch_ignores_shared_home_quota_and_reads_selected_account(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            paths, _live_dir, shared_log = _make_watch_harness(base, names=("primary", "backup"))
+            account_log = paths.accounts_dir / "backup" / ".gemini" / "antigravity-cli" / "log" / "cli-backup.log"
+            account_log.parent.mkdir(parents=True, exist_ok=True)
+            account_log.write_text("boot\n", encoding="utf-8")
+            switch_account(paths, "backup")
+
+            _append_log(shared_log, SAMPLE_QUOTA_LINE)
+            shared_result = poll_quota_logs(paths, rotate=True, account_name="backup")
+            self.assertEqual(shared_result.events, [])
+            self.assertEqual(get_status_snapshot(paths)["active"], "backup")
+
+            _append_log(account_log, SAMPLE_QUOTA_LINE)
+            account_result = poll_quota_logs(paths, rotate=True, account_name="backup")
+            self.assertEqual(len(account_result.events), 1)
+            self.assertTrue(account_result.rotated)
+            self.assertEqual(get_status_snapshot(paths)["active"], "primary")
+
     def test_old_process_quota_does_not_rotate_after_dedupe_window(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             paths, _live_dir, log_path = _make_watch_harness(Path(tmp))

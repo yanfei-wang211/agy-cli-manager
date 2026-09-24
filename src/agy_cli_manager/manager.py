@@ -150,6 +150,9 @@ def ensure_layout(paths: ManagerPaths) -> None:
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.accounts_dir.mkdir(parents=True, exist_ok=True)
     paths.runtime_dir.mkdir(parents=True, exist_ok=True)
+    if os.name != "nt":
+        for directory in (paths.root, paths.accounts_dir, paths.runtime_dir):
+            directory.chmod(0o700)
     if not paths.state_file.exists():
         save_state(
             paths,
@@ -226,6 +229,8 @@ def save_state(paths: ManagerPaths, state: dict) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(temporary, paths.state_file)
+        if os.name != "nt":
+            paths.state_file.chmod(0o600)
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -456,6 +461,17 @@ def resolve_agy_binary(agy_binary: str | None = None) -> str:
     )
 
 
+def _managed_agy_env(home_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["HOME"] = str(home_root)
+    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+    # Retain the existing SSH hint for non-interactive probes. This alone
+    # does not isolate macOS Keychain credentials; agy-managed also selects
+    # the account-specific --gemini_dir when launching a session.
+    env["SSH_CONNECTION"] = "127.0.0.1 1 127.0.0.1 1"
+    return env
+
+
 def _copy_managed_profile_files(source: Path, target: Path) -> None:
     target.mkdir(parents=True, exist_ok=True)
     for name in MANAGED_PROFILE_FILES:
@@ -464,6 +480,8 @@ def _copy_managed_profile_files(source: Path, target: Path) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         if src.is_file():
             shutil.copy2(src, dst)
+            if os.name != "nt":
+                dst.chmod(0o600)
         else:
             dst.unlink(missing_ok=True)
 
@@ -723,9 +741,7 @@ def _google_userinfo_request(access_token: str) -> dict:
 
 def _run_agy_warmup(home_root: Path, agy_binary: str | None, timeout_seconds: int) -> None:
     resolved_binary = resolve_agy_binary(agy_binary)
-    env = os.environ.copy()
-    env["HOME"] = str(home_root)
-    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+    env = _managed_agy_env(home_root)
     proc = subprocess.run(
         [
             resolved_binary,
@@ -815,9 +831,7 @@ def _run_agy_models_command(
     timeout_seconds: int = 30,
 ) -> list[dict]:
     resolved_binary = resolve_agy_binary(agy_binary)
-    env = os.environ.copy()
-    env["HOME"] = str(runtime_home)
-    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+    env = _managed_agy_env(runtime_home)
     proc = subprocess.run(
         [resolved_binary, "models"],
         cwd=runtime_home,
@@ -876,7 +890,13 @@ def _is_short_window_exhausted(meta: dict, now: datetime | None = None, *, thres
     current = now or utc_now()
     windows = _normalize_usage_windows(meta)
     short = windows.get("short", {})
-    if short.get("status") != "known":
+    status = short.get("status")
+    if status == "exhausted":
+        reset_at = parse_timestamp(short.get("reset_at"))
+        if reset_at is not None and reset_at <= current:
+            return False
+        return True
+    if status != "known":
         return False
     value = _coerce_usage_value(short.get("value"))
     if value is None or value > threshold_percent:
@@ -958,7 +978,7 @@ def _best_switch_candidate(paths: ManagerPaths, state: dict, *, exclude: str | N
         short_value = _candidate_usage_value(meta, "short")
         weekly_value = _candidate_usage_value(meta, "weekly")
         short_known = short_value is not None
-        short_low = short_known and short_value <= threshold_percent
+        short_low = (short_known and short_value <= threshold_percent) or _is_short_window_exhausted(meta)
         weekly_known = weekly_value is not None
 
         if strategy == "highest-short":
@@ -1655,9 +1675,7 @@ def probe_profile_identity_via_usage(
     # Each saved account is already a complete home. Probing it directly keeps
     # the shared live home and the manager runtime untouched during switches.
     del live_dir
-    env = os.environ.copy()
-    env["HOME"] = str(source_home)
-    env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+    env = _managed_agy_env(source_home)
 
     proc = subprocess.run(
         [resolved_binary, "-p", "/usage"],
@@ -2491,6 +2509,16 @@ def rotate_after_failure_locked(
         meta["cooldown_until"] = (utc_now() + timedelta(minutes=cooldown_minutes)).isoformat()
     else:
         meta["cooldown_until"] = None
+
+    if reason in {"quota", "individual_quota", "weekly_quota"} or "quota" in str(reason).lower() or "429" in str(reason):
+        windows = _normalize_usage_windows(meta)
+        windows["short"]["status"] = "exhausted"
+        windows["short"]["value"] = 0.0
+        if meta["cooldown_until"]:
+            windows["short"]["reset_at"] = meta["cooldown_until"]
+        meta["usage_windows"] = windows
+        _sync_legacy_usage_fields(meta)
+
     state["active"] = None
     state = sync_state_from_disk(paths, state)
 
@@ -2554,9 +2582,7 @@ def login_account(
         login_dir = runtime_home / ".gemini"
         login_dir.mkdir()
 
-        env = os.environ.copy()
-        env["HOME"] = str(runtime_home)
-        env["PATH"] = env.get("PATH", "/bin:/usr/bin:/usr/local/bin")
+        env = _managed_agy_env(runtime_home)
         try:
             proc = subprocess.Popen(
                 [resolved_binary],

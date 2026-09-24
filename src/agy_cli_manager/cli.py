@@ -174,6 +174,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     watch = sub.add_parser("watch", help="Watch Antigravity CLI logs and fail over on quota errors")
     watch.add_argument("--once", action="store_true", help="Scan newly appended log bytes once and exit")
+    watch.add_argument("--account", help="Watch logs from this managed account only")
     watch.add_argument("--from-start", action="store_true", help="Read existing log bytes from offset 0 instead of skipping history")
     watch.add_argument("--poll-seconds", type=float, default=1.0, help="Follow poll interval in seconds")
     watch.add_argument("--no-rotate", action="store_true", help="Detect quota errors without calling rotate-after-failure")
@@ -2213,6 +2214,7 @@ def main() -> int:
                 force_switch=args.force_switch,
                 cooldown_minutes=args.cooldown_minutes,
                 on_rotate=args.on_rotate,
+                account_name=args.account,
                 as_json=args.json,
             )
         if args.command == "update-meta":

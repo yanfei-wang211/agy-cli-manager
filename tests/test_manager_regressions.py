@@ -7,6 +7,7 @@ import unittest
 import json
 import subprocess
 import io
+import os
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
@@ -187,3 +188,52 @@ class ManagerRegressionTests(unittest.TestCase):
         self.assertEqual(m.load_state(self.paths)["active"], "a")
         self.assertEqual(self.token(self.live_home).read_text(encoding="utf-8"), "token-a")
         self.assertEqual(self.token(m.account_dir(self.paths, "b")).read_text(encoding="utf-8"), "token-b")
+
+    def test_login_forces_file_token_storage_for_managed_profiles(self) -> None:
+        def fake_login(*args, **kwargs):
+            home = Path(kwargs["env"]["HOME"])
+            if kwargs["env"].get("SSH_CONNECTION") == "127.0.0.1 1 127.0.0.1 1":
+                token = self.token(home)
+                token.parent.mkdir(parents=True)
+                token.write_text("token-a", encoding="utf-8")
+            return mock.Mock(poll=mock.Mock(return_value=0))
+
+        with mock.patch.object(m.os, "isatty", return_value=True), \
+             mock.patch.object(m, "resolve_agy_binary", return_value="/fake/agy"), \
+             mock.patch.object(m.subprocess, "Popen", side_effect=fake_login), \
+             mock.patch.object(m, "resolve_login_profile_identity", return_value={}), \
+             redirect_stdout(io.StringIO()):
+            self.assertEqual(m.login_account(self.paths, "a", None), "a")
+        self.assertEqual(self.token(m.account_dir(self.paths, "a")).read_text(encoding="utf-8"), "token-a")
+
+    def test_noninteractive_agy_commands_force_file_token_storage(self) -> None:
+        source = self.base / "managed"
+        token = self.token(source)
+        token.parent.mkdir(parents=True)
+        token.write_text("token-a", encoding="utf-8")
+
+        def fake_run(args, **kwargs):
+            if kwargs["env"].get("SSH_CONNECTION") != "127.0.0.1 1 127.0.0.1 1":
+                return subprocess.CompletedProcess(args, 1, "", "wrong credential backend")
+            if args[-1] == "models":
+                return subprocess.CompletedProcess(args, 0, "gemini-2.5-pro\n", "")
+            if args[-1] == "/usage":
+                return subprocess.CompletedProcess(args, 0, "a@example.com\n", "")
+            return subprocess.CompletedProcess(args, 0, "pong\n", "")
+
+        with mock.patch.object(m, "resolve_agy_binary", return_value="/fake/agy"), \
+             mock.patch.object(m.subprocess, "run", side_effect=fake_run):
+            m._run_agy_warmup(source, None, 10)
+            self.assertTrue(m._run_agy_models_command(source))
+            self.assertEqual(
+                m.probe_profile_identity_via_usage(source)["account_name"],
+                "a@example.com",
+            )
+
+    @unittest.skipIf(os.name == "nt", "POSIX permissions only")
+    def test_manager_credentials_are_owner_only(self) -> None:
+        self.add("a")
+        for directory in (self.paths.root, self.paths.accounts_dir, self.paths.runtime_dir):
+            self.assertEqual(directory.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.paths.state_file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.token(m.account_dir(self.paths, "a")).stat().st_mode & 0o777, 0o600)
