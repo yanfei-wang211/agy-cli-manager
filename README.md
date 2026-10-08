@@ -132,10 +132,11 @@ agy-cli-manager list
 ### 4. Open the dashboard
 
 ```bash
-agy-cli-manager
+agym
+# or: agy-cli-manager
 ```
 
-With no subcommand, the full-screen dashboard opens by default.
+With no subcommand, the full-screen dashboard opens by default. You can use `agym` as a convenient alias for `agy-cli-manager`.
 
 ### 5. Auto-switch when quota is full
 
@@ -156,17 +157,23 @@ agy-cli-manager ack-restart
 
 Leave the dashboard open instead of `watch` if you prefer (`Y` acknowledges the restart). Do not pass `--from-start` unless you intend to replay old quota errors.
 
-### 6. Automatic session supervisor (`agy-managed`)
+### 6. Automatic session supervisor (`agy-managed` / `agy`)
 
-The package provides `agy-managed`. A local `agy` wrapper is optional and is not installed by this package; automation should invoke `agy-managed` explicitly rather than relying on `PATH` order.
+The package provides `agy-managed` and supports standard shortcuts:
+- `agym`: Management console and TUI dashboard (`agy-cli-manager`)
+- `agy`: Managed supervisor with quota-aware failover and auto-resume (`agy-managed`)
+- `agy1`: Isolated session for `primary` account
+- `agy2`: Isolated session for `backup` account
 
 `agy-managed`:
+- Evaluates active account health and remaining quota before launch.
 - Launches `agy` with full terminal/TTY inheritance (no stdout/stderr pipes, avoiding buffer deadlocks).
-- Launches with the selected account's isolated `--gemini_dir` and watches that account's session logs for `RESOURCE_EXHAUSTED` / `Individual quota reached` (including reset durations such as `~2h`). Setting `SSH_CONNECTION` alone does not isolate the macOS Keychain.
-- On quota limit: marks the exhausted account into cooldown, selects another account's isolated profile, and re-launches `agy` in **prompt-guided resume mode** (`--continue --prompt-interactive "<RESUME_PROMPT>"`). This is a prompt-guided restart, not remote conversation state migration.
+- Launches with the selected account's isolated `--gemini_dir` and sets `SSH_CONNECTION="127.0.0.1 1 127.0.0.1 1"` to bypass the macOS Keychain and enforce file-based token isolation.
+- Watches that account's session logs for `RESOURCE_EXHAUSTED` / `Individual quota reached` / `weekly quota reached` (including parsing reset durations such as `~2h`).
+- On quota limit: marks the exhausted account into cooldown, selects another healthy standby account's profile, and re-launches `agy` in **prompt-guided resume mode** (`--continue --prompt-interactive "<RESUME_PROMPT>"`).
 - If all configured accounts are exhausted or in cooldown, outputs a structured JSON/table report and exits with code 2.
 
-The failover unit tests pass, but a real online quota exhaustion and prompt-guided restart have not yet been validated end to end.
+See [Troubleshooting & Solutions Guide](docs/troubleshooting-and-solutions.md) for detailed analysis of macOS Keychain isolation and profile management.
 
 ## First Useful Commands
 

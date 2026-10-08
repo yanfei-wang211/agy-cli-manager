@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-## v0.2.2 - 2026-09-21
+- fix: include full OAuth credentials (`oauth_creds.json`, `google_accounts.json`) and `settings.json` in `MANAGED_PROFILE_FILES` to prevent unauthenticated fallbacks
+- fix: bypass macOS Keychain cross-contamination using `SSH_CONNECTION` in account launchers (`agy1`, `agy2`) and supervisor, ensuring complete profile isolation
+- docs: add troubleshooting and solutions document in `docs/troubleshooting-and-solutions.md` detailing macOS Keychain isolation and profile management
+- feat: document and align standard launcher shortcuts: `agym` (management dashboard), `agy` (auto-failover supervisor), `agy1`/`agy2` (isolated single-account sessions)
 
 - add `agy-cli-manager watch` to tail Antigravity CLI logs and fail over on `Individual quota reached`
 - poll those logs from the dashboard in auto mode and record `trigger=log-watch`
