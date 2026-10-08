@@ -28,9 +28,14 @@ from agy_cli_manager.watch import get_log_watch_snapshot
 
 MANAGED_PROFILE_FILES = (
     "antigravity-cli/antigravity-oauth-token",
+    "settings.json",
+    "oauth_creds.json",
+    "google_accounts.json",
+    "antigravity-cli/settings.json",
 )
 LOGIN_ARTIFACT_SETS = (
     ("antigravity-cli/antigravity-oauth-token",),
+    ("oauth_creds.json",),
 )
 EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 APPLY_AUTH_EMAIL_PATTERN = re.compile(r"applyAuthResult:\s+email=([^,\s]+)", re.IGNORECASE)
