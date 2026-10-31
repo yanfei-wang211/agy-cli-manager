@@ -13,7 +13,8 @@
 | **`agym`** | `agy-cli-manager` | **管理后台**：直接运行进入全屏 TUI 仪表盘，查看各账号健康状态、额度、配额重置倒计时；亦可运行子命令（如 `agym status`、`agym list`）。 |
 | **`agy`** | `agy-managed` | **智能启动与守护**：哪个账号有额度就用哪个。在会话过程中实时监听日志，额度耗尽时自动切号并以断点引导模式继续任务。 |
 | **`agy1`** | 主账号独立入口 | **单独运行主账号**（`primary`），在隔离目录中独立会话，不触发自动故障转移。 |
-| **`agy2`** | 备用账号独立入口 | **单独运行备用账号**（`backup`），支持未配置时引导独立登录，配置后独立进入该账号。 |
+| **`agy2`** | 备用账号1独立入口 | **单独运行备用账号1**（`backup`），支持未配置时引导独立登录，配置后独立进入该账号。 |
+| **`agy3`** | 备用账号2独立入口 | **单独运行备用账号2**（`backup2`），支持未配置时引导独立登录，配置后独立进入该账号。支持继续扩展至更多账号。 |
 
 ---
 
@@ -79,6 +80,20 @@
 - **解决方案**：
   1. 规范化 token 结构，补齐 `auth_method: consumer`；
   2. 提供 `agy1 login` / `agym login primary` 交互入口，当需要重置或刷新主账号真实文件凭据时，可直接进行原生独立登录。
+
+---
+
+### 问题五：多账号登录时误调守护脚本造成递归调用 (Supervisor Recursion during Login)
+- **现象**：
+  在运行 `agy3`（或 `agym login <name>`）为新账号登录时，终端报错：
+  `agy-managed: 还需要先绑定两个账号：运行 agy-cli-manager login primary，退出后再运行 agy-cli-manager login backup。`
+  随后抛出 `error: agy login did not produce a usable auth profile.`。
+- **根本原因**：
+  `resolve_agy_binary` 默认通过 `shutil.which("agy")` 查找二进制。由于用户的 PATH 中 `~/bin` 优先，它命中了 `~/bin/agy`（即 `agy-managed` 守护进程包装脚本）。在临时隔离目录登录时，由于隔离目录尚未生成完整账号记录，守护进程直接阻断并提示错误，导致未拉起底层的真实 Google Antigravity 二进制程序。
+- **解决方案**：
+  1. 在 `resolve_agy_binary` 和 `supervisor._binary` 中优先探测原生二进制路径（如 `/opt/homebrew/bin/agy`、`/usr/local/bin/agy`），若从 PATH 中查找则主动过滤包含 `agy-managed` 的包装脚本。
+  2. 在启动脚本 `agy1`、`agy2`、`agy3` 的登录调用中，显式传入已解析的原生二进制参数 `--agy-binary "$AGY_BIN"`。
+  3. 解除 `supervisor.py` 中 `--account` 只能接收 `primary` 或 `backup` 的硬编码限制，使其支持任意名称的账号无缝启动。
 
 ---
 
