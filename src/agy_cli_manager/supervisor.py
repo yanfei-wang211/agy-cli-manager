@@ -28,6 +28,23 @@ def _binary(env_name: str, fallback: str) -> str:
     configured = os.getenv(env_name, "").strip()
     if configured:
         return configured
+    if fallback == "agy":
+        for candidate in ("/opt/homebrew/bin/agy", "/usr/local/bin/agy"):
+            p = Path(candidate)
+            if p.is_file() and os.access(p, os.X_OK):
+                return str(p)
+        for item in os.getenv("PATH", "").split(os.pathsep):
+            if not item:
+                continue
+            p = Path(item) / fallback
+            if p.is_file() and os.access(p, os.X_OK):
+                try:
+                    content = p.read_text(errors="ignore")
+                    if "agy-managed" in content:
+                        continue
+                except Exception:
+                    pass
+                return str(p)
     resolved = shutil.which(fallback)
     if resolved:
         return resolved

@@ -453,6 +453,24 @@ def resolve_agy_binary(agy_binary: str | None = None) -> str:
     if env_binary:
         return env_binary
 
+    for candidate in ("/opt/homebrew/bin/agy", "/usr/local/bin/agy"):
+        p = Path(candidate)
+        if p.is_file() and os.access(p, os.X_OK):
+            return str(p)
+
+    for item in os.getenv("PATH", "").split(os.pathsep):
+        if not item:
+            continue
+        p = Path(item) / "agy"
+        if p.is_file() and os.access(p, os.X_OK):
+            try:
+                content = p.read_text(errors="ignore")
+                if "agy-managed" in content:
+                    continue
+            except Exception:
+                pass
+            return str(p)
+
     path_binary = shutil.which("agy")
     if path_binary:
         return path_binary
