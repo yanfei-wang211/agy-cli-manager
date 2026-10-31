@@ -98,8 +98,8 @@ def _account_count(status: dict) -> int:
 def _parse_launcher_args(args: list[str]) -> tuple[str | None, list[str]]:
     if not args or args[0] != "--account":
         return None, args
-    if len(args) < 2 or args[1] not in {"primary", "backup"}:
-        raise SupervisorError("--account 只能指定 primary 或 backup。")
+    if len(args) < 2 or not args[1].strip() or args[1].startswith("-"):
+        raise SupervisorError("--account 必须指定有效的账号名称。")
     remaining = args[2:]
     if remaining[:1] == ["--"]:
         remaining = remaining[1:]
